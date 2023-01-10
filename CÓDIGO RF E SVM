@@ -1,0 +1,242 @@
+# MESTRANDO JONILSON GALVAO
+#REAMOSTRAGEM: VIZINHO PROXIMO
+require(raster)
+require(rgdal)
+require(sp)
+require(rgeos)
+require(ggplot2)
+require(dplyr) 
+require(reshape2)
+require(randomForest)
+require(e1071)
+require(caret)
+require(caTools)
+require(prettymapr)
+# IMAGENS UTILIZADAS NO PROJETO
+IMAGENS = stack("IMAGEM_DEZEMBRO_2021/B2.tif",
+                "IMAGEM_DEZEMBRO_2021/B3.tif",
+                "IMAGEM_DEZEMBRO_2021/B4.tif",
+                "IMAGEM_DEZEMBRO_2021/B5.tif",
+                "IMAGEM_DEZEMBRO_2021/B6.tif",
+                "IMAGEM_DEZEMBRO_2021/B7.tif",
+                "IMAGEM_DEZEMBRO_2021/B8.tif",
+                "IMAGEM_DEZEMBRO_2021/B8A.tif",
+                "IMAGEM_DEZEMBRO_2021/B11.tif",
+                "IMAGEM_DEZEMBRO_2021/B12.tif")
+                
+# IMPORTACAO DO SHAPE DA AREA DE ESTUDO
+ITUPARARANGA = readOGR("IMAGEM_DEZEMBRO_2021/AREA_ESTUDO.shp")
+# SISTEMA DE REFERENCIA DE COORDENADAS.
+crs(IMAGENS)
+crs(ITUPARARANGA)
+# ATRIBUDINDO O SRC DAS IMAGENS AO SHAPE 
+ITUPARARANGA_UTM = spTransform(x = ITUPARARANGA, CRSobj = crs(IMAGENS))
+crs(ITUPARARANGA_UTM)
+# RECORTE PARA AREA DE ESTUDO
+ITUPARARANGA_MASK = mask(x= IMAGENS, mask = ITUPARARANGA_UTM)
+ITUPARARANGA_CROP = crop(ITUPARARANGA_MASK, ITUPARARANGA_UTM)
+# PLOTAGEM DAS IMAGENS RECORTADAS
+par(mfrow = c (1,2))
+plot(ITUPARARANGA_MASK$B8, col = gray(0:255/255))
+plot(ITUPARARANGA_CROP$B8, col = gray(0:255/255))
+# EXPORTACAO DO ARQUIVO CROP
+writeRaster(x = ITUPARARANGA_CROP, filename = "RECORTE_ITUPARARANGA.tif")
+# IMPORTACAO DAS IMAGENS RECORTADAS
+RECORTES= stack("RECORTE_ITUPARARANGA.tif")
+#RENOMEACAO DOS NOMES DAS BANDAS 
+names (RECORTES) = c ("B02", "B03","B04","B05", "B06", "B07","B08", "B8A", "B11", "B12" )
+#CALCULO DOS INDICES
+RECORTES$NDVI = (RECORTES$B08 - RECORTES$B04)/(RECORTES$B08 + RECORTES$B04)
+RECORTES$GNDVI   = (RECORTES$B08 - RECORTES$B03)/(RECORTES$B08 + RECORTES$B03)
+RECORTES$NDWI1   = (RECORTES$B08 - RECORTES$B11)/(RECORTES$B08 + RECORTES$B11)
+RECORTES$NDWI2   = (RECORTES$B03 - RECORTES$B08)/(RECORTES$B03 + RECORTES$B08)
+RECORTES$MNDWI   = (RECORTES$B03 - RECORTES$B11)/(RECORTES$B03 + RECORTES$B11)
+RECORTES$NDBI   = (RECORTES$B11 - RECORTES$B08)/(RECORTES$B11 + RECORTES$B08)
+par(mfrow=c(3,3))
+plot(RECORTES$NDVI, col = gray(0:255/255), main = "NDVI")
+plot(RECORTES$GNDVI,  col = gray(0:255/255), main = "GNDVI")
+plot(RECORTES$NDWI1,  col = gray(0:255/255), main = "NDWI1")
+plot(RECORTES$NDWI2,  col = gray(0:255/255), main = "NDWI2")
+plot(RECORTES$MNDWI, col = gray(0:255/255), main = "MNDWI")
+plot(RECORTES$NDBI, col = gray(0:255/255), main = "NDBI")
+#EXPORTANDO OS DADOS
+writeRaster(x=RECORTES, filename = "ITUPARARANGA_INDICES.tif")
+NOMES_RECORTES = names(RECORTES)
+write.csv(x= NOMES_RECORTES, file = "NOMES_BANDASeINDICES.csv")
+#IMPORTACAO DO ARQUIVO RASTER 
+ITUPARARANGA = stack("ITUPARARANGA_INDICES.tif")
+#IMPORTANDO OS NOMES DAS BANDAS
+NOMES_BANDAS = read.table("NOMES_BANDASeINDICES.csv", header = T, sep = ",")
+names(ITUPARARANGA) = NOMES_BANDAS[,2]
+#IMPORTANDO O ARQUIVO SHAPEFILE COM AS AMOSTRAS
+AMOSTRAS = readOGR("IMAGEM_DEZEMBRO_2021/DISSERTACAO_AMOSTRAS.shp")
+View(data.frame(AMOSTRAS))
+#UNIAO DOS PIXELS JUNTO A INFORMACAO DAS CLASSES
+UNIDOS_SHP = gUnaryUnion(spgeom = AMOSTRAS, id = AMOSTRAS$Classe)
+
+#EXTRACAO USANDO O SHAPE ITUPARARANGA
+ATRIBUTOS = raster::extract(x = ITUPARARANGA, y = UNIDOS_SHP)
+print(ATRIBUTOS)
+AGRICULTURA = data.frame(Classe = "agricultura", ATRIBUTOS[[1]])
+AGUA = data.frame(Classe = "agua", ATRIBUTOS[[2]])
+ARBOREA = data.frame(Classe = "arborea", ATRIBUTOS[[3]])
+EUCALIPTO = data.frame(Classe = "eucalipto", ATRIBUTOS[[4]])
+NUVEM = data.frame(Classe = "nuvem", ATRIBUTOS[[5]])
+RASTEIRA = data.frame(Classe = "rasteira", ATRIBUTOS[[6]])
+SOLOEXPOSTO = data.frame(Classe = "soloexposto", ATRIBUTOS[[7]])
+SOLOEXPOSTO_ARBUSTO = data.frame(Classe = "solo_arbusto", ATRIBUTOS[[8]])
+URBANO = data.frame(Classe = "urbano", ATRIBUTOS[[9]])
+# UNIAO  DATA.FRAME
+AMOSTRA_FINAL = rbind(AGRICULTURA,AGUA,ARBOREA,EUCALIPTO,
+                      NUVEM,RASTEIRA,SOLOEXPOSTO,SOLOEXPOSTO_ARBUSTO,URBANO)
+#EXPORTANDO O ARQUIVO EM CSV DAS AMOSTRAS EXTRAIDAS
+write.csv(AMOSTRA_FINAL, 'AMOSTRAS_EXTRAIDAS')
+# AMOSTRAS
+AMOSTRAS = read.table("AMOSTRAS_EXTRAIDAS", header=T, sep = ',')[,-1]
+head(AMOSTRAS)
+#ARMAZENANDO  NA MEMORIA 
+DADOS = select(AMOSTRAS,B02,B03,B04,B05,
+               B06,B07,B08,B8A,B11,B12,NDVI,GNDVI,NDWI1,NDWI2,MNDWI,NDBI,
+               Classe)
+
+str(DADOS)
+DADOS$Classe = as.factor(DADOS$Classe)
+#SEPARACAO DOS DADOS EM TREINAMENTO E VALIDACAO
+AMOSTRAS_TREINO = sample.split(DADOS$Classe, SplitRatio = 0.7)
+(AMOSTRAS_TREINO)
+#SEPARACAO DAS AMOSTRAS
+TREINO = DADOS[AMOSTRAS_TREINO, ]
+VALIDACAO = DADOS[AMOSTRAS_TREINO == F, ]
+write.csv(TREINO, 'DADOS_TREINO.csv')
+write.csv(VALIDACAO, 'DADOS_VALIDACAO.csv')
+# IMPORTACAO DOS ARQUIVOS:TREINO E VALIVALIDACAO
+TREINO = read.table("DADOS_TREINO.csv", header=T, sep = ',')[,-1]
+TREINO$Classe = as.factor(TREINO$Classe)
+VALIDACAO = read.table("DADOS_VALIDACAO.csv", header=T, sep = ',')[,-1]
+VALIDACAO$Classe = as.factor(VALIDACAO$Classe)
+
+##RANDOMFOREST
+set.seed(1234)
+RF = randomForest(Classe~., data=TREINO)
+print(RF)
+plot (RF)
+attributes(RF)
+# MATRIZ DE CONFUSAO
+PREDICAO_RF = predict(RF, VALIDACAO)
+CM_RF = confusionMatrix(data = PREDICAO_RF, reference = VALIDACAO$Classe)
+print(CM_RF)
+# TAXA DE ERRO DA RANDOM FOREST
+plot(RF)
+# AJUSTE DOS PARAMETROS 
+t <- tuneRF(TREINO[,-17], TREINO[,17],
+            stepFactor = 0.5,
+            plot = TRUE,
+            ntreeTry = 200,
+            trace = TRUE,
+            improve = 0.05)
+### POS-TUNE DOS PARAMETROS DA RF
+RF = randomForest(Classe~., data=TREINO, 
+                  ntree = 200,
+                  mtry = 4,
+                  importance = TRUE)
+plot(RF)
+print(RF)
+attributes(RF)
+# VARIAVEIS DE IMPORTANCIA
+varImpPlot(RF,
+           sort = T,
+           n.var = 16,
+           main = "VARIAVEIS DE IMPORTANCIA")
+# PREDICAO E MATRIZ - BASE DE VALIDACAO
+PREDICAO_RF = predict(RF, VALIDACAO)
+CM_RF = confusionMatrix(data = PREDICAO_RF, reference = VALIDACAO$Classe)
+print(CM_RF)
+## VALIDACAO DOS MODELOS P/ O QGIS
+PREDICAO_RF = predict(RF, VALIDACAO)
+# MATRIZ DE CONSUCAO
+MATRIZ_RF = confusionMatrix(data = PREDICAO_RF, reference = VALIDACAO$Classe)
+print(MATRIZ_RF)
+#EXPORTANDO O MODELO 
+saveRDS(object = RF, file = "MODELO_RF.rds")
+#IMPORTANDO O MODELO
+RF = readRDS("MODELO_RF.rds")
+IMAGENS = stack("ITUPARARANGA_INDICES.tif")
+NOMES =read.table("NOMES_BANDASeINDICES.csv", header=T, sep = ',') 
+names(IMAGENS) = NOMES[,2]
+# APLICACAO DA RANDOM FOREST JUNTO AS IMAGENS
+RF.raster = predict(IMAGENS, RF)
+#EXPORTANDO MAPA FINAL
+writeRaster(RF.raster, 'RANDOM_FOREST_APLICADO.tif')
+# MACHINE LEARNING: SUPPORT VECTOR MACHINE
+#SVM LINEAR
+SVM_MODELO = svm (Classe~., data = TREINO, kernel= "linear" )
+print(SVM_MODELO)
+X <- subset(TREINO, select=-Classe)
+Y <- TREINO$Classe
+predicao = predict(SVM_MODELO, X)
+table(predicao, Y)
+set.seed(100)
+tune.out = tune(svm, Classe~., data = TREINO, kernel= "linear", 
+                ranges = list(cost = c (0.01, 0.1, 1, 5, 10, 100)))
+svm (Classe~., data = TREINO, kernel= "linear", 
+     ranges = list(cost = c (0.01, 0.1, 1, 5, 10, 100)))
+print (tune.out)
+#modelo_treinado
+SVM_MODELO_L= svm (Classe~., data = TREINO, kernel= "linear", cost = 100 )
+predicao = predict(SVM_MODELO_L, X)
+table(predicao, Y)
+pred.SVM_L = predict(SVM_MODELO_L, VALIDACAO)
+print(pred.SVM_L)
+CM_SVM = confusionMatrix(data = pred.SVM_L, reference = VALIDACAO$Classe)
+print(CM_SVM)
+saveRDS(object = SVM_MODELO_L, file = "SVM_L.rds")
+#IMPORTANDO O MODELO
+SVM_L = readRDS("SVM_L.rds")
+#APLICANDO O MODELO NAS IMAGENS
+SVM.raster = predict(IMAGENS, SVM_L)
+#EXPORTANDO MAPA FINAL
+writeRaster(SVM.raster, 'SVM_LINEAR_APLICADO.tif')
+#SVM RADIAL
+SVM_MODELO_R = svm (Classe~., data = TREINO, kernel= "radial" )
+print(SVM_MODELO_R)
+predicao = predict(SVM_MODELO_R, X)
+table(predicao, Y)
+svm_tune_R = tune(svm, train.x = X, train.y = Y,
+                  kernel = "radial", ranges = list(cost= 10^(-1:2), gamma=c(.5, 1, 2)))
+print(svm_tune_R)
+SVM_MODELO_R =  svm (Classe~., data = TREINO,kernel= "radial", cost= 100, gamma = 0.5)
+predicao = predict(SVM_MODELO_R, X)
+table(predicao, Y)
+pred.SVM_R= predict(SVM_MODELO_R, VALIDACAO)
+CM_SVM_R = confusionMatrix(data = pred.SVM_R, reference = VALIDACAO$Classe)
+print(CM_SVM_R)
+saveRDS(object = SVM_MODELO_R, file = "SVM_R.rds")
+#IMPORTANDO O MODELO
+SVM_R = readRDS("SVM_R.rds")
+# APLICANDO O MODELO NAS IMAGENS
+SVM.raster_R = predict(IMAGENS, SVM_R)
+#EXPORTANDO MAPA FINAL DO SVM_RADIAL
+writeRaster(SVM.raster_R, 'SVM_RADIAL_APLICADO.tif')
+#SVM POLINOMIAL 
+SVM_MODELO_P =  svm (Classe~., data = TREINO, kernel= "polynomial")
+print(SVM_MODELO_P)
+predicao = predict(SVM_MODELO_P, X)
+table(predicao, Y)
+svm_tune_P = tune(svm, train.x = X, train.y = Y,
+                  kernel = "polynomial",degree=2, ranges = list(cost= 10^(-1:2),
+                                                                gamma=c(.5, 1, 2), coef0=c(0.1, 1, 10) ))
+print(svm_tune_P)
+SVM_MODELO_P =  svm (Classe~., data = TREINO, kernel= "polynomial", cost = 10,
+                     gamma = 2, coef0 = 0.1)
+predicao = predict(SVM_MODELO_P, X)
+table(predicao, Y)
+pred.SVM_P = predict(SVM_MODELO_P, VALIDACAO)
+CM_SVM_P= confusionMatrix(data = pred.SVM_P, reference = VALIDACAO$Classe)
+print(CM_SVM_P)
+saveRDS(object = SVM_MODELO_P, file = "SVM_P.rds")
+#IMPORTANDO O MODELO
+SVM_P = readRDS("SVM_P.rds")
+#APLICANDO O MODELO NAS IMAGENS
+SVM.raster = predict(IMAGENS, SVM_P)
+#EXPORTANDO MAPA FINAL DO SVM_RADIAL
+writeRaster(SVM.raster, 'SVM_POLYNONIAL_APLICADO.tif')
